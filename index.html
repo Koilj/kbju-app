@@ -26,9 +26,28 @@
         }
         ::-webkit-scrollbar { width: 0px; background: transparent; }
         .progress-bar-fill { transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        /* Лоадер для загрузки */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
-<body class="p-4 pb-24 select-none">
+<body class="p-4 pb-24 select-none relative">
+
+    <!-- ИНДИКАТОР ЗАГРУЗКИ -->
+    <div id="loadingScreen" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm transition-opacity duration-300">
+        <div class="loader mb-2"></div>
+        <div class="text-xs font-bold opacity-50">Синхронизация...</div>
+        <div id="debugLog" class="text-[10px] text-red-500 mt-4 max-w-xs text-center px-4 font-mono"></div>
+    </div>
 
     <!-- 1. КАРТОЧКА ПРОГРЕССА -->
     <div class="card p-5 mb-6 relative overflow-hidden">
@@ -161,13 +180,18 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
 
+        // Отладка: выводим ошибки на экран
+        function log(msg) {
+            const logEl = document.getElementById('debugLog');
+            logEl.innerText += msg + '\n';
+            console.log(msg);
+        }
+
         let goals = { kcal: 2000, p: 150, f: 60, c: 200 };
         let todayMeals = [];
         let chartInstance = null;
 
-        // --- ГЕНЕРАЦИЯ ПРАВИЛЬНОГО КЛЮЧА (ИСПРАВЛЕНИЕ) ---
-        // Эта функция создает ключ вида kbju_meals_2023-10-25
-        // Он одинаков на всех устройствах.
+        // КЛЮЧ ДАТЫ (YYYY-MM-DD)
         function getTodayKey() {
             const d = new Date();
             const year = d.getFullYear();
@@ -176,27 +200,51 @@
             return `kbju_meals_${year}-${month}-${day}`;
         }
 
-        // --- CloudStorage ---
+        // --- БЕЗОПАСНОЕ ХРАНИЛИЩЕ (С ТАЙМАУТОМ) ---
+        
+        // Пытаемся получить из Облака, если висит > 2 сек, берем null
         const getCloudData = (key) => {
             return new Promise((resolve) => {
-                tg.CloudStorage.getItem(key, (err, value) => {
-                    if (err) { console.error(err); resolve(null); } 
-                    else { resolve(value); }
-                });
+                // Таймер безопасности
+                const timeout = setTimeout(() => {
+                    log("Cloud timeout for " + key);
+                    resolve(null); 
+                }, 2000); // 2 секунды ждем
+
+                try {
+                    tg.CloudStorage.getItem(key, (err, value) => {
+                        clearTimeout(timeout); // Отменяем таймер
+                        if (err) {
+                            log("Cloud Error: " + JSON.stringify(err));
+                            resolve(null);
+                        } else {
+                            resolve(value);
+                        }
+                    });
+                } catch (e) {
+                    clearTimeout(timeout);
+                    log("API Error: " + e);
+                    resolve(null);
+                }
             });
         };
 
-        const setCloudData = (key, value) => {
-            return new Promise((resolve, reject) => {
-                tg.CloudStorage.setItem(key, value, (err, stored) => {
-                    if (err) {
-                        tg.showAlert("Ошибка! Возможно, слишком много еды сохранено (лимит Телеграм).");
-                        reject(err);
-                    } else {
-                        resolve(stored);
-                    }
+        const setCloudData = async (key, value) => {
+            try {
+                return new Promise((resolve) => {
+                    tg.CloudStorage.setItem(key, value, (err, stored) => {
+                        if (err) {
+                            log("Save Err: " + err);
+                            tg.showAlert("Ошибка сохранения в облако. Проверь интернет.");
+                            resolve(false);
+                        } else {
+                            resolve(true);
+                        }
+                    });
                 });
-            });
+            } catch (e) {
+                log("Save Crash: " + e);
+            }
         };
 
         function initChart() {
@@ -225,26 +273,28 @@
         }
 
         async function loadData() {
-            tg.MainButton.setText("Загрузка...");
-            tg.MainButton.showProgress();
-            tg.MainButton.show();
-
+            // Убираем MainButton.showProgress, используем свой лоадер
+            document.getElementById('loadingScreen').classList.remove('hidden');
+            
             try {
-                // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ КЛЮЧА
                 const dateKey = getTodayKey();
+                log("Loading: " + dateKey);
                 
                 const [savedGoals, savedMeals] = await Promise.all([
                     getCloudData('kbju_goals'),
                     getCloudData(dateKey)
                 ]);
 
-                if (savedGoals) {
+                if (savedGoals && savedGoals.length > 0) {
                     goals = JSON.parse(savedGoals);
                 } else {
-                    document.getElementById('settingsModal').classList.remove('hidden');
+                    // Если из облака не пришло, пробуем LocalStorage браузера (запасной вариант)
+                    const localGoals = localStorage.getItem('kbju_goals');
+                    if(localGoals) goals = JSON.parse(localGoals);
+                    else document.getElementById('settingsModal').classList.remove('hidden');
                 }
 
-                if (savedMeals) {
+                if (savedMeals && savedMeals.length > 0) {
                     todayMeals = JSON.parse(savedMeals);
                 } else {
                     todayMeals = [];
@@ -252,10 +302,15 @@
 
                 renderUI();
             } catch (e) {
-                tg.showAlert("Ошибка: " + e);
+                log("Global Error: " + e);
             } finally {
-                tg.MainButton.hideProgress();
-                tg.MainButton.hide();
+                // Скрываем лоадер
+                setTimeout(() => {
+                    document.getElementById('loadingScreen').classList.add('opacity-0', 'pointer-events-none');
+                    setTimeout(() => {
+                         document.getElementById('loadingScreen').classList.add('hidden');
+                    }, 300);
+                }, 500);
             }
         }
 
@@ -385,8 +440,6 @@
                 return;
             }
 
-            // Оптимизация: сохраняем меньше данных, чтобы не забить CloudStorage
-            // (ключи JSON сократил, но логика та же)
             const newItem = {
                 type: document.getElementById('mealType').value,
                 name: name,
@@ -399,7 +452,9 @@
             todayMeals.push(newItem);
             
             const dateKey = getTodayKey();
+            // Сохраняем и в Облако, и в LocalStorage (на всякий случай)
             await setCloudData(dateKey, JSON.stringify(todayMeals));
+            localStorage.setItem(dateKey, JSON.stringify(todayMeals));
             
             closeModal();
             renderUI();
@@ -411,6 +466,7 @@
                 todayMeals.splice(index, 1);
                 const dateKey = getTodayKey();
                 await setCloudData(dateKey, JSON.stringify(todayMeals));
+                localStorage.setItem(dateKey, JSON.stringify(todayMeals));
                 renderUI();
                 tg.HapticFeedback.impactOccurred('medium');
             }
@@ -428,6 +484,8 @@
             };
             
             await setCloudData('kbju_goals', JSON.stringify(goals));
+            localStorage.setItem('kbju_goals', JSON.stringify(goals));
+            
             document.getElementById('settingsModal').classList.add('hidden');
             renderUI();
         }
