@@ -4,496 +4,425 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>KBJU Tracker</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
-        body {
-            background-color: var(--tg-theme-bg-color, #f5f5f5);
-            color: var(--tg-theme-text-color, #000000);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            -webkit-font-smoothing: antialiased;
+        body { 
+            background-color: #f5f5f5; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            -webkit-user-select: none; 
+            user-select: none; 
         }
-        .card {
-            background-color: var(--tg-theme-secondary-bg-color, #ffffff);
-            border-radius: 16px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        .btn-primary {
-            background-color: var(--tg-theme-button-color, #3b82f6);
-            color: var(--tg-theme-button-text-color, #ffffff);
-        }
-        ::-webkit-scrollbar { width: 0px; background: transparent; }
-        .progress-bar-fill { transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
-        
-        /* Лоадер для загрузки */
-        .loader {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #3b82f6;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-        }
+        /* Лоадер */
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Консоль ошибок (скрыта по умолчанию) */
+        #error-console { display: none; background: #000; color: #ff4444; padding: 10px; font-size: 10px; margin-bottom: 10px; border-radius: 8px; font-family: monospace; }
+
+        /* Календарь без рамок */
+        input[type="date"] {
+            background: transparent;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #374151;
+            border: none;
+            outline: none;
+            font-family: inherit;
+        }
     </style>
 </head>
-<body class="p-4 pb-24 select-none relative">
+<body class="p-4 pb-24">
 
-    <!-- ИНДИКАТОР ЗАГРУЗКИ -->
-    <div id="loadingScreen" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm transition-opacity duration-300">
-        <div class="loader mb-2"></div>
-        <div class="text-xs font-bold opacity-50">Синхронизация...</div>
-        <div id="debugLog" class="text-[10px] text-red-500 mt-4 max-w-xs text-center px-4 font-mono"></div>
+    <!-- 🔴 КОНСОЛЬ ОШИБОК -->
+    <div id="error-console">ERRORS:<br></div>
+
+    <!-- ⏳ ЭКРАН ЗАГРУЗКИ -->
+    <div id="loading" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center">
+        <div class="loader mb-4"></div>
+        <div class="text-sm text-gray-500">Загрузка...</div>
+        <button onclick="forceStart()" class="mt-8 text-blue-500 text-xs underline opacity-60">Долго грузит? Нажми сюда</button>
     </div>
 
-    <!-- 1. КАРТОЧКА ПРОГРЕССА -->
-    <div class="card p-5 mb-6 relative overflow-hidden">
-        <h2 class="text-lg font-bold mb-4 text-center opacity-80">Прогресс сегодня</h2>
+    <!-- 📱 ОСНОВНОЙ ЭКРАН -->
+    <div id="main-app" class="hidden">
         
-        <div class="flex justify-center mb-4 relative h-40">
-            <canvas id="caloriesChart"></canvas>
-            <div class="absolute inset-0 flex items-center justify-center flex-col pt-4">
-                <span id="calLeft" class="text-3xl font-bold tracking-tighter">0</span>
-                <span class="text-xs uppercase font-semibold opacity-50">ккал ост.</span>
+        <!-- ВЕРХНЯЯ ПАНЕЛЬ: ДАТА И НАСТРОЙКИ -->
+        <div class="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow-sm">
+            <div class="flex items-center gap-2">
+                <span class="text-xl">📅</span>
+                <input type="date" id="datePicker" onchange="changeDate()">
             </div>
-        </div>
-
-        <div class="grid grid-cols-3 gap-4 mt-2 text-center">
-            <div>
-                <div class="text-xs font-bold mb-1 opacity-70">БЕЛКИ</div>
-                <div class="h-2 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div id="barP" class="h-full bg-blue-500 w-0 progress-bar-fill"></div>
-                </div>
-                <div class="text-[10px] mt-1 font-medium opacity-60"><span id="valP">0</span> / <span id="goalP">0</span></div>
-            </div>
-            <div>
-                <div class="text-xs font-bold mb-1 opacity-70">ЖИРЫ</div>
-                <div class="h-2 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div id="barF" class="h-full bg-yellow-500 w-0 progress-bar-fill"></div>
-                </div>
-                <div class="text-[10px] mt-1 font-medium opacity-60"><span id="valF">0</span> / <span id="goalF">0</span></div>
-            </div>
-            <div>
-                <div class="text-xs font-bold mb-1 opacity-70">УГЛЕВ.</div>
-                <div class="h-2 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div id="barC" class="h-full bg-green-500 w-0 progress-bar-fill"></div>
-                </div>
-                <div class="text-[10px] mt-1 font-medium opacity-60"><span id="valC">0</span> / <span id="goalC">0</span></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 2. СПИСОК ЕДЫ -->
-    <div id="mealsContainer" class="space-y-4 pb-10"></div>
-
-    <!-- 3. МОДАЛКА ДОБАВЛЕНИЯ -->
-    <div id="addModal" class="fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center transition-opacity">
-        <div class="bg-white w-full sm:w-96 rounded-t-2xl sm:rounded-2xl p-6 transform transition-transform translate-y-0 shadow-2xl" style="background-color: var(--tg-theme-bg-color);">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold">Добавить еду</h3>
-                <button onclick="closeModal()" class="text-gray-400 p-2">✕</button>
-            </div>
-
-            <div class="mb-4">
-                <div class="text-[10px] font-bold opacity-50 uppercase mb-2 tracking-wider">Быстрый выбор</div>
-                <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar" id="quickAddContainer"></div>
-            </div>
-            
-            <div class="space-y-3">
-                <select id="mealType" class="w-full p-3 rounded-xl border-0 bg-gray-100 dark:bg-white/5 outline-none font-medium">
-                    <option value="breakfast">☕️ Завтрак</option>
-                    <option value="lunch">🍲 Обед</option>
-                    <option value="snack">🍏 Перекус</option>
-                    <option value="dinner">🥗 Ужин</option>
-                </select>
-                
-                <input type="text" id="foodName" placeholder="Название (напр. Борщ)" class="w-full p-3 rounded-xl border-0 bg-gray-100 dark:bg-white/5 outline-none">
-                
-                <div class="grid grid-cols-4 gap-2">
-                    <div class="col-span-1">
-                        <label class="text-[10px] opacity-50 block mb-1">ККАЛ</label>
-                        <input type="number" id="inKcal" class="w-full p-2 rounded-lg bg-gray-100 dark:bg-white/5 text-center font-bold outline-none">
-                    </div>
-                    <div class="col-span-1">
-                        <label class="text-[10px] opacity-50 block mb-1">БЕЛКИ</label>
-                        <input type="number" id="inP" class="w-full p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-center outline-none">
-                    </div>
-                    <div class="col-span-1">
-                        <label class="text-[10px] opacity-50 block mb-1">ЖИРЫ</label>
-                        <input type="number" id="inF" class="w-full p-2 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 text-center outline-none">
-                    </div>
-                    <div class="col-span-1">
-                        <label class="text-[10px] opacity-50 block mb-1">УГЛИ</label>
-                        <input type="number" id="inC" class="w-full p-2 rounded-lg bg-green-50 dark:bg-green-900/20 text-center outline-none">
-                    </div>
-                </div>
-            </div>
-
-            <button onclick="saveFood()" class="w-full mt-6 py-3.5 rounded-xl font-bold text-lg btn-primary shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-transform">
-                Сохранить
+            <!-- Кнопка настроек -->
+            <button onclick="openSettings()" class="p-2 text-gray-400 hover:text-blue-500 active:scale-90 transition-transform">
+                <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
             </button>
         </div>
+
+        <!-- КРУГ И ПОЛОСКИ -->
+        <div class="bg-white rounded-2xl p-5 shadow-sm mb-6 relative">
+            <div class="relative h-40 flex justify-center mb-4">
+                <canvas id="caloriesChart"></canvas>
+                <div class="absolute inset-0 flex items-center justify-center flex-col pt-4">
+                    <span id="calLeft" class="text-3xl font-bold">0</span>
+                    <span class="text-xs text-gray-400 uppercase">ккал ост.</span>
+                </div>
+            </div>
+            <!-- Полоски БЖУ -->
+            <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                <div>
+                    <div class="font-bold text-gray-500 mb-1">БЕЛКИ</div>
+                    <div class="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden"><div id="barP" class="h-full bg-blue-500 w-0"></div></div>
+                    <div class="mt-1"><span id="valP">0</span>/<span id="goalP">0</span></div>
+                </div>
+                <div>
+                    <div class="font-bold text-gray-500 mb-1">ЖИРЫ</div>
+                    <div class="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden"><div id="barF" class="h-full bg-yellow-500 w-0"></div></div>
+                    <div class="mt-1"><span id="valF">0</span>/<span id="goalF">0</span></div>
+                </div>
+                <div>
+                    <div class="font-bold text-gray-500 mb-1">УГЛИ</div>
+                    <div class="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden"><div id="barC" class="h-full bg-green-500 w-0"></div></div>
+                    <div class="mt-1"><span id="valC">0</span>/<span id="goalC">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- СПИСОК ЕДЫ -->
+        <div id="mealsList" class="space-y-3 pb-10"></div>
+        <div id="emptyMsg" class="text-center text-gray-400 text-sm mt-4 hidden">На этот день записей нет 🍃</div>
+
+        <!-- КНОПКА + -->
+        <button onclick="openAddModal()" class="fixed bottom-6 right-6 w-14 h-14 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center text-3xl font-light active:scale-90 transition-transform">+</button>
     </div>
 
-    <!-- 4. МОДАЛКА НАСТРОЕК -->
-    <div id="settingsModal" class="fixed inset-0 z-50 hidden bg-black/80 flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-sm rounded-2xl p-6 text-center" style="background-color: var(--tg-theme-bg-color);">
+    <!-- 🟦 МОДАЛКА ДОБАВЛЕНИЯ ЕДЫ -->
+    <div id="modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-end sm:items-center justify-center backdrop-blur-sm transition-opacity">
+        <div class="bg-white w-full sm:w-96 rounded-t-2xl sm:rounded-2xl p-6 shadow-2xl">
+            <h3 class="font-bold text-lg mb-4 text-center">Добавить продукт</h3>
+            
+            <!-- Быстрые кнопки -->
+            <div class="flex gap-2 overflow-x-auto pb-3 mb-2 no-scrollbar">
+                <button onclick="fill('Яблоко',52,0,0,14)" class="px-3 py-2 bg-gray-100 rounded-lg text-xs whitespace-nowrap active:bg-blue-100">🍎 Яблоко</button>
+                <button onclick="fill('Банан',96,1,0,21)" class="px-3 py-2 bg-gray-100 rounded-lg text-xs whitespace-nowrap active:bg-blue-100">🍌 Банан</button>
+                <button onclick="fill('Кофе',40,2,2,4)" class="px-3 py-2 bg-gray-100 rounded-lg text-xs whitespace-nowrap active:bg-blue-100">☕️ Кофе</button>
+                <button onclick="fill('Яйцо',70,6,5,0)" class="px-3 py-2 bg-gray-100 rounded-lg text-xs whitespace-nowrap active:bg-blue-100">🥚 Яйцо</button>
+                <button onclick="fill('Курица',165,31,3,0)" class="px-3 py-2 bg-gray-100 rounded-lg text-xs whitespace-nowrap active:bg-blue-100">🍗 Курица</button>
+            </div>
+
+            <input type="text" id="mName" placeholder="Название (напр. Борщ)" class="w-full p-3 bg-gray-100 rounded-xl mb-3 outline-none font-medium">
+            <div class="flex gap-3 mb-5">
+                <div class="w-1/2">
+                    <label class="text-[10px] text-gray-400 uppercase font-bold ml-1">Ккал</label>
+                    <input type="number" id="mKcal" class="w-full p-3 bg-gray-100 rounded-xl text-center font-bold outline-none text-lg">
+                </div>
+                <!-- Можно раскрыть БЖУ если нужно, пока скрыты для простоты -->
+                <input type="hidden" id="mP" value="0"><input type="hidden" id="mF" value="0"><input type="hidden" id="mC" value="0">
+            </div>
+            
+            <button onclick="addItem()" class="w-full py-3.5 bg-blue-500 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/30 active:scale-95 transition-transform">Сохранить</button>
+            <button onclick="closeModal()" class="w-full py-3 text-gray-400 mt-2 font-medium">Отмена</button>
+        </div>
+    </div>
+
+    <!-- ⚙️ МОДАЛКА НАСТРОЕК (ЦЕЛИ) -->
+    <div id="settingsModal" class="fixed inset-0 bg-black/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-sm rounded-2xl p-6 text-center shadow-2xl">
             <h2 class="text-2xl font-bold mb-2">🎯 Твоя цель</h2>
-            <p class="text-sm opacity-60 mb-6">Настрой суточные нормы.</p>
+            <p class="text-sm text-gray-400 mb-6">Установи суточные нормы</p>
             
             <div class="space-y-4 text-left">
                 <div>
-                    <label class="text-xs font-bold uppercase opacity-50 ml-1">Норма Калорий</label>
-                    <input type="number" id="goalKcalInput" placeholder="2000" class="w-full mt-1 p-4 rounded-xl bg-gray-100 dark:bg-white/5 text-xl font-bold outline-none">
+                    <label class="text-xs font-bold uppercase text-gray-400 ml-1">Калории</label>
+                    <input type="number" id="setKcal" placeholder="2000" class="w-full mt-1 p-3 rounded-xl bg-gray-100 text-xl font-bold outline-none">
                 </div>
                 <div class="grid grid-cols-3 gap-3">
                     <div>
-                        <label class="text-xs font-bold uppercase opacity-50 ml-1">Белки</label>
-                        <input type="number" id="goalPInput" placeholder="150" class="w-full mt-1 p-3 rounded-xl bg-gray-100 dark:bg-white/5 text-center outline-none">
+                        <label class="text-xs font-bold uppercase text-gray-400 ml-1">Белки</label>
+                        <input type="number" id="setP" placeholder="150" class="w-full mt-1 p-2 rounded-xl bg-blue-50 text-center outline-none">
                     </div>
                     <div>
-                        <label class="text-xs font-bold uppercase opacity-50 ml-1">Жиры</label>
-                        <input type="number" id="goalFInput" placeholder="60" class="w-full mt-1 p-3 rounded-xl bg-gray-100 dark:bg-white/5 text-center outline-none">
+                        <label class="text-xs font-bold uppercase text-gray-400 ml-1">Жиры</label>
+                        <input type="number" id="setF" placeholder="60" class="w-full mt-1 p-2 rounded-xl bg-yellow-50 text-center outline-none">
                     </div>
                     <div>
-                        <label class="text-xs font-bold uppercase opacity-50 ml-1">Угли</label>
-                        <input type="number" id="goalCInput" placeholder="200" class="w-full mt-1 p-3 rounded-xl bg-gray-100 dark:bg-white/5 text-center outline-none">
+                        <label class="text-xs font-bold uppercase text-gray-400 ml-1">Угли</label>
+                        <input type="number" id="setC" placeholder="200" class="w-full mt-1 p-2 rounded-xl bg-green-50 text-center outline-none">
                     </div>
                 </div>
             </div>
             
-            <button onclick="saveSettings()" class="w-full mt-8 py-3.5 rounded-xl font-bold text-lg btn-primary">
-                Начать путь 🚀
+            <button onclick="saveSettings()" class="w-full mt-8 py-3.5 rounded-xl font-bold text-lg bg-blue-500 text-white shadow-lg shadow-blue-500/30 active:scale-95 transition-transform">
+                Сохранить настройки
             </button>
         </div>
     </div>
 
-    <!-- КНОПКА ДОБАВИТЬ -->
-    <button onclick="openModal()" class="fixed bottom-6 right-6 w-14 h-14 rounded-full btn-primary shadow-xl shadow-blue-500/40 flex items-center justify-center text-3xl z-40 active:scale-90 transition-transform">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-    </button>
-
     <script>
+        // --- 1. ЛОГИРОВАНИЕ ОШИБОК (ЧТОБЫ ВИДЕТЬ НА ТЕЛЕФОНЕ) ---
+        const errConsole = document.getElementById('error-console');
+        function logError(msg) {
+            errConsole.style.display = 'block';
+            errConsole.innerHTML += "🔴 " + msg + "<br>";
+            console.error(msg);
+        }
+        window.onerror = function(msg, url, line) { logError(msg + " (line " + line + ")"); };
+
+        // --- 2. ИНИЦИАЛИЗАЦИЯ TELEGRAM ---
         const tg = window.Telegram.WebApp;
+        tg.ready();
         tg.expand();
 
-        // Отладка: выводим ошибки на экран
-        function log(msg) {
-            const logEl = document.getElementById('debugLog');
-            logEl.innerText += msg + '\n';
-            console.log(msg);
+        // Данные по умолчанию
+        let data = {
+            goals: { k: 2000, p: 150, f: 60, c: 200 },
+            meals: []
+        };
+        let chart = null;
+
+        // --- 3. РАБОТА С ДАТОЙ ---
+        function getSelectedDateKey() {
+            const pickerValue = document.getElementById('datePicker').value;
+            if (!pickerValue) {
+                const d = new Date();
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `kbju_meals_${y}-${m}-${day}`;
+            }
+            return `kbju_meals_${pickerValue}`;
         }
 
-        let goals = { kcal: 2000, p: 150, f: 60, c: 200 };
-        let todayMeals = [];
-        let chartInstance = null;
-
-        // КЛЮЧ ДАТЫ (YYYY-MM-DD)
-        function getTodayKey() {
+        function setTodayInPicker() {
             const d = new Date();
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
             const day = String(d.getDate()).padStart(2, '0');
-            return `kbju_meals_${year}-${month}-${day}`;
+            document.getElementById('datePicker').value = `${y}-${m}-${day}`;
         }
 
-        // --- БЕЗОПАСНОЕ ХРАНИЛИЩЕ (С ТАЙМАУТОМ) ---
-        
-        // Пытаемся получить из Облака, если висит > 2 сек, берем null
-        const getCloudData = (key) => {
-            return new Promise((resolve) => {
-                // Таймер безопасности
-                const timeout = setTimeout(() => {
-                    log("Cloud timeout for " + key);
-                    resolve(null); 
-                }, 2000); // 2 секунды ждем
-
-                try {
-                    tg.CloudStorage.getItem(key, (err, value) => {
-                        clearTimeout(timeout); // Отменяем таймер
-                        if (err) {
-                            log("Cloud Error: " + JSON.stringify(err));
-                            resolve(null);
-                        } else {
-                            resolve(value);
-                        }
-                    });
-                } catch (e) {
-                    clearTimeout(timeout);
-                    log("API Error: " + e);
-                    resolve(null);
-                }
-            });
-        };
-
-        const setCloudData = async (key, value) => {
+        // --- 4. ЗАГРУЗКА ДАННЫХ ---
+        async function loadAllData() {
             try {
-                return new Promise((resolve) => {
-                    tg.CloudStorage.setItem(key, value, (err, stored) => {
-                        if (err) {
-                            log("Save Err: " + err);
-                            tg.showAlert("Ошибка сохранения в облако. Проверь интернет.");
-                            resolve(false);
-                        } else {
-                            resolve(true);
-                        }
-                    });
-                });
-            } catch (e) {
-                log("Save Crash: " + e);
-            }
-        };
-
-        function initChart() {
-            const ctx = document.getElementById('caloriesChart').getContext('2d');
-            const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--tg-theme-button-color') || '#3b82f6';
-            
-            chartInstance = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Съедено', 'Осталось'],
-                    datasets: [{
-                        data: [0, 100],
-                        backgroundColor: [accentColor, 'rgba(150, 150, 150, 0.1)'],
-                        borderWidth: 0,
-                        borderRadius: 20,
-                        cutout: '85%',
-                    }]
-                },
-                options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false, 
-                    animation: { duration: 1000 },
-                    plugins: { legend: { display: false }, tooltip: { enabled: false } } 
+                // 1. Грузим настройки (цели)
+                const savedGoals = localStorage.getItem('kbju_goals');
+                if (savedGoals) {
+                    data.goals = JSON.parse(savedGoals);
+                } else {
+                    // Если целей нет вообще — открываем окно настроек
+                    setTimeout(() => openSettings(), 500);
                 }
-            });
-        }
 
-        async function loadData() {
-            // Убираем MainButton.showProgress, используем свой лоадер
-            document.getElementById('loadingScreen').classList.remove('hidden');
-            
-            try {
-                const dateKey = getTodayKey();
-                log("Loading: " + dateKey);
+                // 2. Грузим еду для выбранной даты
+                await loadMealsForDate();
                 
-                const [savedGoals, savedMeals] = await Promise.all([
-                    getCloudData('kbju_goals'),
-                    getCloudData(dateKey)
-                ]);
-
-                if (savedGoals && savedGoals.length > 0) {
-                    goals = JSON.parse(savedGoals);
-                } else {
-                    // Если из облака не пришло, пробуем LocalStorage браузера (запасной вариант)
-                    const localGoals = localStorage.getItem('kbju_goals');
-                    if(localGoals) goals = JSON.parse(localGoals);
-                    else document.getElementById('settingsModal').classList.remove('hidden');
-                }
-
-                if (savedMeals && savedMeals.length > 0) {
-                    todayMeals = JSON.parse(savedMeals);
-                } else {
-                    todayMeals = [];
-                }
-
-                renderUI();
             } catch (e) {
-                log("Global Error: " + e);
+                logError("Init error: " + e.message);
             } finally {
-                // Скрываем лоадер
-                setTimeout(() => {
-                    document.getElementById('loadingScreen').classList.add('opacity-0', 'pointer-events-none');
-                    setTimeout(() => {
-                         document.getElementById('loadingScreen').classList.add('hidden');
-                    }, 300);
-                }, 500);
+                // Убираем экран загрузки
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('main-app').classList.remove('hidden');
             }
         }
 
-        function renderUI() {
-            let total = { kcal: 0, p: 0, f: 0, c: 0 };
-            todayMeals.forEach(m => {
-                total.kcal += m.kcal;
-                total.p += m.p;
-                total.f += m.f;
-                total.c += m.c;
-            });
-
-            const remaining = Math.max(0, goals.kcal - total.kcal);
-            chartInstance.data.datasets[0].data = [total.kcal, remaining];
+        async function loadMealsForDate() {
+            const list = document.getElementById('mealsList');
+            list.style.opacity = '0.5'; // Эффект загрузки
             
-            if (total.kcal > goals.kcal) {
-                chartInstance.data.datasets[0].backgroundColor[0] = '#ef4444';
-            } else {
-                chartInstance.data.datasets[0].backgroundColor[0] = getComputedStyle(document.documentElement).getPropertyValue('--tg-theme-button-color') || '#3b82f6';
+            const key = getSelectedDateKey();
+            data.meals = []; // Очистка перед загрузкой
+
+            // A. Сначала LocalStorage (быстро)
+            const localRaw = localStorage.getItem(key);
+            if (localRaw) {
+                data.meals = JSON.parse(localRaw);
             }
-            chartInstance.update();
+            render(); 
 
-            document.getElementById('calLeft').innerText = remaining;
-            updateBar('P', total.p, goals.p);
-            updateBar('F', total.f, goals.f);
-            updateBar('C', total.c, goals.c);
-
-            renderMealsList();
-        }
-
-        function updateBar(type, val, goal) {
-            document.getElementById(`val${type}`).innerText = val;
-            document.getElementById(`goal${type}`).innerText = goal;
-            const pct = Math.min(100, (val / goal) * 100);
-            const bar = document.getElementById(`bar${type}`);
-            bar.style.width = `${pct}%`;
-            if(val > goal) bar.classList.add('bg-red-500');
-            else bar.classList.remove('bg-red-500');
-        }
-
-        function renderMealsList() {
-            const container = document.getElementById('mealsContainer');
-            container.innerHTML = '';
-            
-            if (todayMeals.length === 0) {
-                container.innerHTML = '<div class="text-center opacity-40 mt-10 text-sm">Пока пусто. Покушай! 😋</div>';
-                return;
-            }
-
-            const categories = {
-                'breakfast': 'Завтрак ☕️', 'lunch': 'Обед 🍲',
-                'snack': 'Перекус 🍏', 'dinner': 'Ужин 🥗'
-            };
-
-            for (let [key, label] of Object.entries(categories)) {
-                const mealsInCat = todayMeals.filter(m => m.type === key);
-                if (mealsInCat.length === 0) continue;
-
-                let html = `<div class="card p-4"><h3 class="font-bold mb-3 text-xs opacity-50 uppercase tracking-wide">${label}</h3>`;
-                
-                mealsInCat.forEach((meal) => {
-                    const globalIndex = todayMeals.indexOf(meal);
-                    html += `
-                        <div class="flex justify-between items-center py-3 border-b border-gray-100 dark:border-white/5 last:border-0">
-                            <div>
-                                <div class="font-semibold text-sm">${meal.name}</div>
-                                <div class="text-[11px] opacity-60 mt-0.5">🔥 ${meal.kcal} • Б${meal.p} Ж${meal.f} У${meal.c}</div>
-                            </div>
-                            <button onclick="deleteMeal(${globalIndex})" class="text-red-400 p-2 active:scale-90 transition-transform">✕</button>
-                        </div>
-                    `;
-                });
-                html += `</div>`;
-                container.innerHTML += html;
-            }
-        }
-
-        const presets = [
-            { name: 'Яблоко', k: 52, p: 0, f: 0, c: 14 },
-            { name: 'Банан', k: 96, p: 1, f: 0, c: 21 },
-            { name: 'Кофе с мол.', k: 40, p: 2, f: 2, c: 4 },
-            { name: 'Творог 5%', k: 120, p: 16, f: 5, c: 3 },
-            { name: 'Яйцо', k: 70, p: 6, f: 5, c: 0 },
-            { name: 'Гречка', k: 110, p: 4, f: 1, c: 20 },
-            { name: 'Курица', k: 165, p: 31, f: 3, c: 0 },
-        ];
-
-        function renderPresets() {
-            const cont = document.getElementById('quickAddContainer');
-            cont.innerHTML = '';
-            presets.forEach(p => {
-                const btn = document.createElement('button');
-                btn.className = "flex-shrink-0 px-3 py-2 bg-gray-100 dark:bg-white/10 rounded-lg text-[11px] font-medium whitespace-nowrap active:bg-blue-500 active:text-white transition-colors";
-                btn.innerText = p.name;
-                btn.onclick = () => {
-                    document.getElementById('foodName').value = p.name;
-                    document.getElementById('inKcal').value = p.k;
-                    document.getElementById('inP').value = p.p;
-                    document.getElementById('inF').value = p.f;
-                    document.getElementById('inC').value = p.c;
-                    tg.HapticFeedback.selectionChanged();
-                };
-                cont.appendChild(btn);
+            // B. Потом Облако (фоном)
+            tg.CloudStorage.getItem(key, (err, val) => {
+                list.style.opacity = '1';
+                if (!err && val) {
+                    data.meals = JSON.parse(val);
+                    render(); // Обновляем, если в облаке новее
+                } else {
+                    // Если ошибка облака, просто оставляем локальные данные
+                    list.style.opacity = '1';
+                }
             });
         }
 
-        function openModal() {
-            document.getElementById('addModal').classList.remove('hidden');
-            tg.BackButton.show();
-            tg.BackButton.onClick(closeModal);
+        function changeDate() {
+            loadMealsForDate();
         }
 
-        function closeModal() {
-            document.getElementById('addModal').classList.add('hidden');
-            tg.BackButton.hide();
-            tg.BackButton.offClick(closeModal);
-            document.getElementById('foodName').value = '';
-            document.getElementById('inKcal').value = '';
+        // --- 5. СОХРАНЕНИЕ ---
+        function saveMeals() {
+            const key = getSelectedDateKey();
+            const json = JSON.stringify(data.meals);
+            localStorage.setItem(key, json); // Телефон
+            tg.CloudStorage.setItem(key, json); // Облако
+            render();
         }
 
-        async function saveFood() {
-            const name = document.getElementById('foodName').value;
-            const kcal = Number(document.getElementById('inKcal').value);
-            
-            if(!name || !kcal) {
-                tg.showAlert("Нужно ввести название и калории!");
-                return;
-            }
+        function saveSettings() {
+            const k = document.getElementById('setKcal').value;
+            if(!k) { tg.showAlert("Введи калории!"); return; }
 
-            const newItem = {
-                type: document.getElementById('mealType').value,
-                name: name,
-                kcal: kcal,
-                p: Number(document.getElementById('inP').value) || 0,
-                f: Number(document.getElementById('inF').value) || 0,
-                c: Number(document.getElementById('inC').value) || 0
+            data.goals = {
+                k: Number(k),
+                p: Number(document.getElementById('setP').value) || 150,
+                f: Number(document.getElementById('setF').value) || 60,
+                c: Number(document.getElementById('setC').value) || 200
             };
 
-            todayMeals.push(newItem);
-            
-            const dateKey = getTodayKey();
-            // Сохраняем и в Облако, и в LocalStorage (на всякий случай)
-            await setCloudData(dateKey, JSON.stringify(todayMeals));
-            localStorage.setItem(dateKey, JSON.stringify(todayMeals));
-            
-            closeModal();
-            renderUI();
+            const json = JSON.stringify(data.goals);
+            localStorage.setItem('kbju_goals', json);
+            tg.CloudStorage.setItem('kbju_goals', json);
+
+            document.getElementById('settingsModal').classList.add('hidden');
+            render();
             tg.HapticFeedback.notificationOccurred('success');
         }
 
-        async function deleteMeal(index) {
-            if(confirm('Удалить запись?')) {
-                todayMeals.splice(index, 1);
-                const dateKey = getTodayKey();
-                await setCloudData(dateKey, JSON.stringify(todayMeals));
-                localStorage.setItem(dateKey, JSON.stringify(todayMeals));
-                renderUI();
-                tg.HapticFeedback.impactOccurred('medium');
+        // --- 6. ОТРИСОВКА ---
+        function render() {
+            // Считаем суммы
+            let totals = { k:0, p:0, f:0, c:0 };
+            data.meals.forEach(m => {
+                totals.k += m.k; totals.p += m.p; totals.f += m.f; totals.c += m.c;
+            });
+
+            const left = data.goals.k - totals.k;
+            document.getElementById('calLeft').innerText = left > 0 ? left : 0;
+            
+            updateBar('P', totals.p, data.goals.p);
+            updateBar('F', totals.f, data.goals.f);
+            updateBar('C', totals.c, data.goals.c);
+
+            // Список еды
+            const list = document.getElementById('mealsList');
+            const emptyMsg = document.getElementById('emptyMsg');
+            list.innerHTML = '';
+
+            if (data.meals.length === 0) {
+                emptyMsg.classList.remove('hidden');
+            } else {
+                emptyMsg.classList.add('hidden');
+                data.meals.forEach((m, idx) => {
+                    list.innerHTML += `
+                        <div class="bg-white p-4 rounded-xl shadow-sm flex justify-between items-center border-b border-gray-50 last:border-0">
+                            <div>
+                                <div class="font-bold text-sm">${m.name}</div>
+                                <div class="text-xs text-gray-500">${m.k} ккал</div>
+                            </div>
+                            <button onclick="removeMeal(${idx})" class="text-red-400 font-bold px-3 py-2 active:scale-90 transition-transform">✕</button>
+                        </div>
+                    `;
+                });
+            }
+
+            updateChart(totals.k, left > 0 ? left : 0);
+        }
+
+        function updateBar(type, val, max) {
+            const pct = Math.min(100, (val/max)*100);
+            document.getElementById(`val${type}`).innerText = val;
+            document.getElementById(`goal${type}`).innerText = max;
+            const bar = document.getElementById(`bar${type}`);
+            bar.style.width = pct + "%";
+            if(val > max) bar.classList.add('bg-red-500'); 
+            else bar.classList.remove('bg-red-500');
+        }
+
+        function updateChart(eaten, left) {
+            const ctx = document.getElementById('caloriesChart');
+            if(!ctx) return;
+            const color = eaten > data.goals.k ? '#ef4444' : '#3b82f6';
+
+            if(chart) {
+                chart.data.datasets[0].data = [eaten, left];
+                chart.data.datasets[0].backgroundColor[0] = color;
+                chart.update();
+            } else {
+                chart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Еда', 'Ост.'],
+                        datasets: [{ 
+                            data: [eaten, left], 
+                            backgroundColor: [color, '#f3f4f6'], 
+                            borderWidth: 0, 
+                            borderRadius: 20,
+                            cutout: '85%' 
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: false }, animation: { duration: 500 } }
+                });
             }
         }
 
-        async function saveSettings() {
-            const k = document.getElementById('goalKcalInput').value;
-            if(!k) return;
-
-            goals = {
-                kcal: Number(k),
-                p: Number(document.getElementById('goalPInput').value) || 100,
-                f: Number(document.getElementById('goalFInput').value) || 60,
-                c: Number(document.getElementById('goalCInput').value) || 200
-            };
-            
-            await setCloudData('kbju_goals', JSON.stringify(goals));
-            localStorage.setItem('kbju_goals', JSON.stringify(goals));
-            
-            document.getElementById('settingsModal').classList.add('hidden');
-            renderUI();
+        // --- 7. UI ФУНКЦИИ ---
+        function openAddModal() { document.getElementById('modal').classList.remove('hidden'); }
+        function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+        
+        function openSettings() {
+            // Заполняем инпуты текущими значениями
+            document.getElementById('setKcal').value = data.goals.k;
+            document.getElementById('setP').value = data.goals.p;
+            document.getElementById('setF').value = data.goals.f;
+            document.getElementById('setC').value = data.goals.c;
+            document.getElementById('settingsModal').classList.remove('hidden');
         }
 
-        // Запуск
-        renderPresets();
-        initChart();
-        loadData();
+        function fill(n,k,p,f,c) {
+            document.getElementById('mName').value = n;
+            document.getElementById('mKcal').value = k;
+            document.getElementById('mP').value = p;
+            document.getElementById('mF').value = f;
+            document.getElementById('mC').value = c;
+        }
+
+        function addItem() {
+            const name = document.getElementById('mName').value;
+            const k = Number(document.getElementById('mKcal').value);
+            if(!name || !k) { tg.showAlert("Заполните название и ккал"); return; }
+
+            data.meals.push({
+                name: name, k: k,
+                p: Number(document.getElementById('mP').value)||0,
+                f: Number(document.getElementById('mF').value)||0,
+                c: Number(document.getElementById('mC').value)||0
+            });
+            saveMeals();
+            closeModal();
+            // Очистка полей
+            document.getElementById('mName').value = '';
+            document.getElementById('mKcal').value = '';
+        }
+
+        function removeMeal(idx) {
+            if(confirm("Удалить?")) {
+                data.meals.splice(idx, 1);
+                saveMeals();
+            }
+        }
+
+        function forceStart() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('main-app').classList.remove('hidden');
+            setTodayInPicker();
+            loadAllData();
+        }
+
+        // ЗАПУСК
+        window.onload = function() {
+            setTodayInPicker();
+            loadAllData();
+        };
 
     </script>
 </body>
